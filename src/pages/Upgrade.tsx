@@ -82,7 +82,7 @@ export function UpgradePage() {
     }
 
     setProcessing(true)
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787'
+    const apiUrl = import.meta.env.VITE_API_URL || (window.location.hostname !== 'localhost' ? 'https://barberflow-api.lflimas2022.workers.dev' : 'http://localhost:8787')
 
     const body: Record<string, unknown> = {
       plan: selectedPlan,
