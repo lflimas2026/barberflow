@@ -1,4 +1,5 @@
 import { createContext, useContext, useCallback, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import {
   canAccessFeature,
@@ -25,6 +26,7 @@ const TrialContext = createContext<TrialContextType | null>(null)
 
 export function TrialProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [showPaywall, setShowPaywall] = useState(false)
   const [paywallFeature, setPaywallFeature] = useState('')
 
@@ -63,10 +65,9 @@ export function TrialProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const handleUpgrade = useCallback(() => {
-    const checkoutUrl = `https://barberflow.pro/checkout?plan=pro&user_id=${user?.id}`
-    window.open(checkoutUrl, '_blank')
     setShowPaywall(false)
-  }, [user?.id])
+    navigate('/upgrade')
+  }, [navigate])
 
   return (
     <TrialContext.Provider

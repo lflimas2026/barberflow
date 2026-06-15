@@ -13,25 +13,33 @@ import {
   Cell,
 } from 'recharts'
 
-const weeklyData = [
-  { day: 'Seg', receita: 420, cortes: 7 },
-  { day: 'Ter', receita: 380, cortes: 6 },
-  { day: 'Qua', receita: 510, cortes: 9 },
-  { day: 'Qui', receita: 450, cortes: 8 },
-  { day: 'Sex', receita: 620, cortes: 11 },
-  { day: 'Sáb', receita: 780, cortes: 14 },
-  { day: 'Dom', receita: 200, cortes: 3 },
+interface RechartsComponentsProps {
+  weeklyData?: { day: string; receita: number; cortes: number }[]
+  pieData?: { name: string; value: number }[]
+}
+
+const defaultWeeklyData = [
+  { day: 'Seg', receita: 0, cortes: 0 },
+  { day: 'Ter', receita: 0, cortes: 0 },
+  { day: 'Qua', receita: 0, cortes: 0 },
+  { day: 'Qui', receita: 0, cortes: 0 },
+  { day: 'Sex', receita: 0, cortes: 0 },
+  { day: 'Sáb', receita: 0, cortes: 0 },
+  { day: 'Dom', receita: 0, cortes: 0 },
 ]
 
-const pieData = [
-  { name: 'Corte', value: 60 },
-  { name: 'Barba', value: 25 },
-  { name: 'Combo', value: 15 },
+const defaultPieData = [
+  { name: 'Corte', value: 0 },
+  { name: 'Barba', value: 0 },
+  { name: 'Combo', value: 0 },
 ]
 
 const COLORS = ['#D32F2F', '#fca5a5', '#b91c1c']
 
-export function RechartsComponents() {
+export function RechartsComponents({
+  weeklyData = defaultWeeklyData,
+  pieData = defaultPieData,
+}: RechartsComponentsProps) {
   return (
     <div className="space-y-4">
       <div>

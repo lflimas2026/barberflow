@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useTrial } from '@/context/TrialContext'
 import { PaywallModal } from '@/components/premium/PaywallModal'
@@ -7,50 +7,70 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { StatsCards } from '@/components/dashboard/StatsCards'
-import { CheckCircle, Clock, DollarSign, Lock, MessageSquare } from 'lucide-react'
+import { CheckCircle, Clock, DollarSign, Lock, MessageSquare, Calendar } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { getStatusIcon, formatCurrency } from '@/lib/utils'
+import { api } from '@/lib/api'
 import type { Agendamento, BarbeiroDashboardStats } from '@/types'
-
-const MOCK_STATS: BarbeiroDashboardStats = {
-  agendamentos_hoje: 5,
-  faturamento_hoje: 300,
-  comissao_dia: 75,
-  comissao_mes: 1200,
-  fila: [
-    {
-      id: '1', barbeiro_id: 'b1', cliente_id: 'c1', servico_id: 's1',
-      data_hora: new Date().toISOString(), duracao_min: 45,
-      status: 'aguardando', valor: 60, criado_em: new Date().toISOString(),
-      cliente: { id: 'c1', user_id: 'u1', nome: 'Carlos Silva', whatsapp: '(11) 98888-7777', total_visitas: 5, criado_em: new Date().toISOString() },
-      servico: { id: 's1', user_id: 'u1', nome: 'Corte de Cabelo', preco: 60, duracao_min: 45, ativo: true, created_at: new Date().toISOString() },
-    },
-    {
-      id: '2', barbeiro_id: 'b1', cliente_id: 'c2', servico_id: 's2',
-      data_hora: new Date(Date.now() + 3600000).toISOString(), duracao_min: 30,
-      status: 'confirmado', valor: 45, criado_em: new Date().toISOString(),
-      cliente: { id: 'c2', user_id: 'u1', nome: 'João Santos', whatsapp: '(11) 97777-6666', total_visitas: 3, criado_em: new Date().toISOString() },
-      servico: { id: 's2', user_id: 'u1', nome: 'Barba', preco: 45, duracao_min: 30, ativo: true, created_at: new Date().toISOString() },
-    },
-    {
-      id: '3', barbeiro_id: 'b1', cliente_id: 'c3', servico_id: 's1',
-      data_hora: new Date(Date.now() + 7200000).toISOString(), duracao_min: 45,
-      status: 'confirmado', valor: 60, criado_em: new Date().toISOString(),
-      cliente: { id: 'c3', user_id: 'u1', nome: 'Rafael Oliveira', whatsapp: '(11) 96666-5555', total_visitas: 8, criado_em: new Date().toISOString() },
-      servico: { id: 's1', user_id: 'u1', nome: 'Corte de Cabelo', preco: 60, duracao_min: 45, ativo: true, created_at: new Date().toISOString() },
-    },
-  ],
-}
 
 export function BarbeiroDashboardPage() {
   const { user } = useAuth()
   const { canAccess, openPaywall } = useTrial()
-  const [stats] = useState(MOCK_STATS)
   const showComissao = canAccess('comissao_automatica')
 
-  const handleFinalizar = (id: string) => {
-    console.log('finalizar', id)
+  const [stats, setStats] = useState<BarbeiroDashboardStats>({
+    agendamentos_hoje: 0,
+    faturamento_hoje: 0,
+    comissao_dia: 0,
+    comissao_mes: 0,
+    fila: [],
+  })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!user?.id) return
+    setLoading(true)
+    Promise.all([
+      api.agendamentos.list({ barbeiro_id: user.id, date: new Date().toISOString().split('T')[0] }),
+    ])
+      .then(([agendamentosData]) => {
+        const fila = agendamentosData.agendamentos
+        const faturamento = fila
+          .filter((a: any) => a.status === 'finalizado')
+          .reduce((sum: number, a: any) => sum + (a.valor || 0), 0)
+        setStats({
+          agendamentos_hoje: fila.length,
+          faturamento_hoje: faturamento,
+          comissao_dia: 0,
+          comissao_mes: 0,
+          fila,
+        })
+      })
+      .catch(() => {
+        setStats({
+          agendamentos_hoje: 0,
+          faturamento_hoje: 0,
+          comissao_dia: 0,
+          comissao_mes: 0,
+          fila: [],
+        })
+      })
+      .finally(() => setLoading(false))
+  }, [user?.id])
+
+  const handleFinalizar = async (id: string) => {
+    try {
+      await api.agendamentos.updateStatus(id, 'finalizado')
+      setStats((prev) => ({
+        ...prev,
+        fila: prev.fila.map((a) =>
+          a.id === id ? { ...a, status: 'finalizado' as const } : a
+        ),
+      }))
+    } catch {
+      console.error('Erro ao finalizar agendamento')
+    }
   }
 
   const handleWhatsApp = (clienteNome: string, data: string) => {
@@ -76,12 +96,25 @@ export function BarbeiroDashboardPage() {
         </div>
       </div>
 
-      <StatsCards
-        agendamentosHoje={stats.agendamentos_hoje}
-        faturamentoHoje={stats.faturamento_hoje}
-        barbeirosAtivos={1}
-        trend={0}
-      />
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <CardContent className="p-5">
+                <div className="h-4 w-24 bg-gray-200 dark:bg-dark-300 rounded animate-pulse mb-3" />
+                <div className="h-8 w-16 bg-gray-200 dark:bg-dark-300 rounded animate-pulse" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <StatsCards
+          agendamentosHoje={stats.agendamentos_hoje}
+          faturamentoHoje={stats.faturamento_hoje}
+          barbeirosAtivos={1}
+          trend={0}
+        />
+      )}
 
       {!showComissao ? (
         <Card className="border-dashed border-barber-500">
@@ -128,45 +161,52 @@ export function BarbeiroDashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {stats.fila.map((agendamento, index) => (
-              <div
-                key={agendamento.id}
-                className="flex items-center gap-4 p-3 rounded-lg bg-gray-50 dark:bg-dark-300"
-              >
-                <div className="text-center min-w-[40px]">
-                  <p className="text-lg font-bold">{format(parseISO(agendamento.data_hora), "HH:mm")}</p>
-                  <p className="text-xs text-gray-500">{agendamento.duracao_min}min</p>
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium truncate">{agendamento.cliente?.nome}</p>
-                    <span>{getStatusIcon(agendamento.status)}</span>
+          {stats.fila.length === 0 ? (
+            <div className="text-center py-8">
+              <Calendar className="w-8 h-8 text-gray-300 dark:text-dark-500 mx-auto mb-3" />
+              <p className="text-gray-500">Nenhum agendamento hoje</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {stats.fila.map((agendamento, index) => (
+                <div
+                  key={agendamento.id}
+                  className="flex items-center gap-4 p-3 rounded-lg bg-gray-50 dark:bg-dark-300"
+                >
+                  <div className="text-center min-w-[40px]">
+                    <p className="text-lg font-bold">{format(parseISO(agendamento.data_hora), "HH:mm")}</p>
+                    <p className="text-xs text-gray-500">{agendamento.duracao_min}min</p>
                   </div>
-                  <p className="text-sm text-gray-500">{agendamento.servico?.nome}</p>
-                </div>
 
-                <div className="flex gap-2">
-                  {agendamento.status === 'aguardando' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleWhatsApp(agendamento.cliente?.nome ?? '', agendamento.data_hora)}
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                    </Button>
-                  )}
-                  {agendamento.status !== 'finalizado' && agendamento.status !== 'cancelado' && (
-                    <Button size="sm" onClick={() => handleFinalizar(agendamento.id)}>
-                      <CheckCircle className="w-4 h-4 mr-1" />
-                      Finalizar
-                    </Button>
-                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium truncate">{agendamento.cliente?.nome}</p>
+                      <span>{getStatusIcon(agendamento.status)}</span>
+                    </div>
+                    <p className="text-sm text-gray-500">{agendamento.servico?.nome}</p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {agendamento.status === 'aguardando' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleWhatsApp(agendamento.cliente?.nome ?? '', agendamento.data_hora)}
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </Button>
+                    )}
+                    {agendamento.status !== 'finalizado' && agendamento.status !== 'cancelado' && (
+                      <Button size="sm" onClick={() => handleFinalizar(agendamento.id)}>
+                        <CheckCircle className="w-4 h-4 mr-1" />
+                        Finalizar
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 

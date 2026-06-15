@@ -4,11 +4,13 @@ import { getStatusColor } from '@/lib/utils'
 import { AlertTriangle, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 
 export function TrialBanner() {
   const { user } = useAuth()
   const { daysLeft, isExpired } = useTrial()
+  const navigate = useNavigate()
   const [dismissed, setDismissed] = useState(false)
 
   if (dismissed || user?.plan !== 'free_trial') return null
@@ -26,7 +28,7 @@ export function TrialBanner() {
               Seu período de teste terminou. Faça upgrade para continuar usando todos os recursos.
             </p>
             <div className="flex gap-2 mt-3">
-              <Button size="sm" className="bg-barber-500 hover:bg-barber-600">
+              <Button size="sm" className="bg-barber-500 hover:bg-barber-600" onClick={() => navigate('/upgrade')}>
                 <Sparkles className="w-4 h-4 mr-1" />
                 Upgrade Pro
               </Button>
@@ -54,7 +56,7 @@ export function TrialBanner() {
             </p>
             <Progress value={progress} className="mt-2 h-1.5" />
             <div className="flex gap-2 mt-3">
-              <Button size="sm" className="bg-barber-500 hover:bg-barber-600">
+              <Button size="sm" className="bg-barber-500 hover:bg-barber-600" onClick={() => navigate('/upgrade')}>
                 <Sparkles className="w-4 h-4 mr-1" />
                 Upgrade Pro
               </Button>

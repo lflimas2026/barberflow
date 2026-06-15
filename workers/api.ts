@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { jwt } from 'hono/jwt'
+import { createAsaasClient } from './asaas'
 
 interface Env {
   DB: D1Database
@@ -8,11 +9,22 @@ interface Env {
   GOOGLE_CLIENT_ID: string
   ASAAS_API_KEY: string
   WHATSAPP_API_KEY: string
+  ASAAS_ENVIRONMENT: 'sandbox' | 'production'
 }
 
 const app = new Hono<{ Bindings: Env }>()
 
 app.use('/*', cors())
+
+const PLAN_PRICES: Record<string, number> = {
+  pro: 49.90,
+  pro_plus: 89.90,
+}
+
+const PLAN_LABELS: Record<string, string> = {
+  pro: 'BarberFlow Pro',
+  pro_plus: 'BarberFlow Pro+',
+}
 
 // Health check
 app.get('/api/health', (c) => c.json({ status: 'ok', version: '1.0.0' }))
@@ -231,15 +243,195 @@ app.post('/api/whatsapp/notify', async (c) => {
   return c.json({ success: true, url: whatsappUrl, message })
 })
 
-// Stripe/Asaas checkout redirect
-app.post('/api/checkout', async (c) => {
-  const { plan, userId } = await c.req.json()
-  const prices: Record<string, number> = { pro: 4990, pro_plus: 8990 }
+// Asaas Payment Gateway
+// ======================
 
-  // Redirect to actual payment gateway
-  return c.json({
-    checkout_url: `https://barberflow.pro/checkout?plan=${plan}&user_id=${userId}&amount=${prices[plan]}`,
+// Find or create Asaas customer
+async function getOrCreateAsaasCustomer(asaas: ReturnType<typeof createAsaasClient>, user: { id: string; name: string; email: string; cpf?: string; phone?: string }) {
+  // Try to find existing customer
+  const existing = await asaas.findCustomer(user.email).catch(() => null)
+  if (existing?.data?.length > 0) {
+    return existing.data[0]
+  }
+
+  // Create new customer
+  return asaas.createCustomer({
+    name: user.name,
+    email: user.email,
+    cpfCnpj: user.cpf || '00000000000',
+    phone: user.phone,
+    externalReference: user.id,
   })
+}
+
+// Create checkout / payment
+app.post('/api/checkout', async (c) => {
+  try {
+    const { plan, userId, paymentMethod, customer: customerData } = await c.req.json()
+
+    if (!c.env.ASAAS_API_KEY) {
+      // Fallback if Asaas not configured
+      const prices: Record<string, number> = { pro: 4990, pro_plus: 8990 }
+      return c.json({
+        checkout_url: `https://barberflow.pro/checkout?plan=${plan}&user_id=${userId}&amount=${prices[plan]}`,
+      })
+    }
+
+    const asaas = createAsaasClient(c.env.ASAAS_API_KEY)
+    const price = PLAN_PRICES[plan]
+    const planLabel = PLAN_LABELS[plan]
+
+    if (!price) {
+      return c.json({ error: 'Invalid plan' }, 400)
+    }
+
+    // Get user data from DB
+    const user = customerData || await c.env.DB.prepare(
+      'SELECT * FROM users WHERE id = ?'
+    ).bind(userId).first()
+
+    if (!user) {
+      return c.json({ error: 'User not found' }, 404)
+    }
+
+    // Get or create Asaas customer
+    const asaasCustomer = await getOrCreateAsaasCustomer(asaas, user as any)
+
+    let payment
+
+    switch (paymentMethod) {
+      case 'pix': {
+        payment = await asaas.createPixPayment(asaasCustomer.id!, price, `Assinatura ${planLabel}`)
+        // Get QR Code
+        const pixQrCode = await asaas.getPixQrCode(payment.id!)
+        return c.json({
+          success: true,
+          payment: {
+            id: payment.id,
+            method: 'PIX',
+            value: price,
+            status: 'pending',
+            dueDate: payment.dueDate,
+          },
+          pix: {
+            encodedImage: pixQrCode.encodedImage,
+            payload: pixQrCode.payload,
+            expirationDate: pixQrCode.expirationDate,
+          },
+        })
+      }
+
+      case 'boleto': {
+        payment = await asaas.createBoletoPayment(asaasCustomer.id!, price, `Assinatura ${planLabel}`)
+        const boleto = await asaas.getBoletoUrl(payment.id!)
+        return c.json({
+          success: true,
+          payment: {
+            id: payment.id,
+            method: 'BOLETO',
+            value: price,
+            status: 'pending',
+            dueDate: payment.dueDate,
+          },
+          boleto: {
+            url: boleto.url,
+            barCode: boleto.barCode,
+          },
+        })
+      }
+
+      case 'credit_card': {
+        const [expiryMonth, expiryYear] = (customerData?.cardExpiry || '12/30').split('/')
+        payment = await asaas.createCreditCardPayment({
+          customerId: asaasCustomer.id!,
+          value: price,
+          description: `Assinatura ${planLabel}`,
+          holderName: customerData?.cardName || user.name,
+          cardNumber: customerData?.cardNumber || '',
+          expiryMonth,
+          expiryYear: `20${expiryYear}`,
+          ccv: customerData?.cardCvv || '',
+          holderCpfCnpj: customerData?.cpf || '00000000000',
+          holderEmail: user.email,
+        })
+
+        // If payment was successful, create subscription for recurring billing
+        if (payment.id) {
+          await asaas.createSubscription({
+            customer: asaasCustomer.id!,
+            billingType: 'CREDIT_CARD',
+            value: price,
+            nextDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            description: `Assinatura ${planLabel}`,
+            cycle: 'MONTHLY',
+            externalReference: userId,
+          })
+        }
+
+        // Update user's plan in DB
+        await c.env.DB.prepare(
+          'UPDATE users SET plan = ? WHERE id = ?'
+        ).bind(plan, userId).run()
+
+        return c.json({
+          success: true,
+          payment: {
+            id: payment.id,
+            method: 'CREDIT_CARD',
+            value: price,
+            status: payment.id ? 'confirmed' : 'pending',
+          },
+        })
+      }
+
+      default:
+        return c.json({ error: 'Invalid payment method' }, 400)
+    }
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Payment failed' }, 500)
+  }
+})
+
+// Asaas Webhook (to receive payment confirmations)
+app.post('/api/webhooks/asaas', async (c) => {
+  try {
+    const body = await c.req.json()
+    const event = body.event
+    const payment = body.payment
+
+    if (!event || !payment) {
+      return c.json({ error: 'Invalid webhook payload' })
+    }
+
+    // Handle different event types
+    switch (event) {
+      case 'PAYMENT_CONFIRMED':
+      case 'PAYMENT_RECEIVED':
+        // Find user by externalReference and update plan
+        if (payment.externalReference) {
+          const plan = payment.value === 89.90 ? 'pro_plus' : 'pro'
+          await c.env.DB.prepare(
+            'UPDATE users SET plan = ?, trial_ends_at = NULL WHERE id = ?'
+          ).bind(plan, payment.externalReference).run()
+        }
+        break
+
+      case 'PAYMENT_OVERDUE':
+      case 'PAYMENT_DELETED':
+      case 'SUBSCRIPTION_CANCELLED':
+        // Revert user to free_trial
+        if (payment.externalReference) {
+          await c.env.DB.prepare(
+            'UPDATE users SET plan = ? WHERE id = ?'
+          ).bind('free_trial', payment.externalReference).run()
+        }
+        break
+    }
+
+    return c.json({ received: true })
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500)
+  }
 })
 
 export default app

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '@/context/AuthContext'
 import { useTrial } from '@/context/TrialContext'
 import { TrialBanner } from '@/components/dashboard/TrialBanner'
 import { FilaHoje } from '@/components/dashboard/FilaHoje'
@@ -11,60 +12,65 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Plus, TrendingUp, BarChart3 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import type { Agendamento, DashboardStats } from '@/types'
-import { addDays, format } from 'date-fns'
+import { format, addDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { RechartsComponents } from '@/components/dashboard/RechartsComponents'
-
-const MOCK_STATS: DashboardStats = {
-  agendamentos_hoje: 8,
-  faturamento_hoje: 560,
-  barbeiros_ativos: 3,
-  ticket_medio: 70,
-  agendamentos_trend: 12,
-  faturamento_breakdown: { servicos: 480, produtos: 80 },
-  fila_hoje: [
-    {
-      id: '1',
-      barbeiro_id: 'b1',
-      cliente_id: 'c1',
-      servico_id: 's1',
-      data_hora: new Date().toISOString(),
-      duracao_min: 45,
-      status: 'aguardando',
-      valor: 60,
-      criado_em: new Date().toISOString(),
-      barbeiro: { id: 'b1', user_id: 'u1', name: 'Fernando', photo_url: '', comissao_percent: 50, ativo: true, created_at: new Date().toISOString() },
-      cliente: { id: 'c1', user_id: 'u1', nome: 'Carlos Silva', whatsapp: '(11) 98888-7777', total_visitas: 5, criado_em: new Date().toISOString() },
-      servico: { id: 's1', user_id: 'u1', nome: 'Corte de Cabelo', preco: 60, duracao_min: 45, ativo: true, created_at: new Date().toISOString() },
-    },
-    {
-      id: '2',
-      barbeiro_id: 'b2',
-      cliente_id: 'c2',
-      servico_id: 's2',
-      data_hora: new Date(Date.now() + 3600000).toISOString(),
-      duracao_min: 30,
-      status: 'confirmado',
-      valor: 45,
-      criado_em: new Date().toISOString(),
-      barbeiro: { id: 'b2', user_id: 'u1', name: 'Pedro', photo_url: '', comissao_percent: 50, ativo: true, created_at: new Date().toISOString() },
-      cliente: { id: 'c2', user_id: 'u1', nome: 'João Santos', whatsapp: '(11) 97777-6666', total_visitas: 3, criado_em: new Date().toISOString() },
-      servico: { id: 's2', user_id: 'u1', nome: 'Barba', preco: 45, duracao_min: 30, ativo: true, created_at: new Date().toISOString() },
-    },
-  ],
-  proximos_7_dias: Array.from({ length: 7 }, (_, i) => ({
-    data: addDays(new Date(), i).toISOString(),
-    ocupacao: Math.floor(Math.random() * 8) + 2,
-  })),
-}
+import { api } from '@/lib/api'
+import type { Agendamento } from '@/types'
 
 export function DashboardPage() {
+  const { user } = useAuth()
   const { canAccess, openPaywall } = useTrial()
   const navigate = useNavigate()
-  const [stats] = useState<DashboardStats>(MOCK_STATS)
-  const [loading] = useState(false)
   const showRelatorios = canAccess('relatorios')
+
+  const [stats, setStats] = useState({
+    agendamentos_hoje: 0,
+    faturamento_hoje: 0,
+    barbeiros_ativos: 0,
+    ticket_medio: 0,
+    agendamentos_trend: 0,
+    fila_hoje: [] as Agendamento[],
+    proximos_7_dias: [] as { data: string; ocupacao: number }[],
+  })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!user?.id) return
+    setLoading(true)
+    api.dashboard.stats(user.id)
+      .then((data) => {
+        setStats((prev) => ({
+          ...prev,
+          agendamentos_hoje: data.agendamentos_hoje,
+          faturamento_hoje: data.faturamento_hoje,
+          barbeiros_ativos: data.barbeiros_ativos,
+          proximos_7_dias: data.proximos_7_dias.length > 0
+            ? data.proximos_7_dias
+            : Array.from({ length: 7 }, (_, i) => ({
+                data: addDays(new Date(), i).toISOString(),
+                ocupacao: 0,
+              })),
+        }))
+      })
+      .catch(() => {
+        // Fallback: empty state
+        setStats((prev) => ({
+          ...prev,
+          proximos_7_dias: Array.from({ length: 7 }, (_, i) => ({
+            data: addDays(new Date(), i).toISOString(),
+            ocupacao: 0,
+          })),
+        }))
+      })
+      .finally(() => setLoading(false))
+
+    api.agendamentos.list({ user_id: user.id, date: new Date().toISOString().split('T')[0] })
+      .then((data) => {
+        setStats((prev) => ({ ...prev, fila_hoje: data.agendamentos }))
+      })
+      .catch(() => {})
+  }, [user?.id])
 
   const handleRelatoriosClick = () => {
     if (!showRelatorios) {

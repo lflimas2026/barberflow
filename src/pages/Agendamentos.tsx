@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { format, startOfWeek, addDays, parseISO, isSameDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight, Plus, MessageSquare, Clock, Filter } from 'lucide-react'
@@ -9,44 +9,32 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn, getStatusIcon, getStatusColor, formatCurrency } from '@/lib/utils'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@/context/AuthContext'
+import { api } from '@/lib/api'
 import type { Agendamento, AgendamentoStatus } from '@/types'
 
-const MOCK_AGENDAMENTOS: Agendamento[] = [
-  {
-    id: '1', barbeiro_id: 'b1', cliente_id: 'c1', servico_id: 's1',
-    data_hora: new Date().toISOString(), duracao_min: 45,
-    status: 'aguardando', valor: 60, criado_em: new Date().toISOString(),
-    barbeiro: { id: 'b1', user_id: 'u1', name: 'Fernando', photo_url: '', comissao_percent: 50, ativo: true, created_at: new Date().toISOString() },
-    cliente: { id: 'c1', user_id: 'u1', nome: 'Carlos Silva', whatsapp: '(11) 98888-7777', total_visitas: 5, criado_em: new Date().toISOString() },
-    servico: { id: 's1', user_id: 'u1', nome: 'Corte de Cabelo', preco: 60, duracao_min: 45, ativo: true, created_at: new Date().toISOString() },
-  },
-  {
-    id: '2', barbeiro_id: 'b2', cliente_id: 'c2', servico_id: 's2',
-    data_hora: new Date(Date.now() + 3600000).toISOString(), duracao_min: 30,
-    status: 'confirmado', valor: 45, criado_em: new Date().toISOString(),
-    barbeiro: { id: 'b2', user_id: 'u1', name: 'Pedro', photo_url: '', comissao_percent: 50, ativo: true, created_at: new Date().toISOString() },
-    cliente: { id: 'c2', user_id: 'u1', nome: 'João Santos', whatsapp: '(11) 97777-6666', total_visitas: 3, criado_em: new Date().toISOString() },
-    servico: { id: 's2', user_id: 'u1', nome: 'Barba', preco: 45, duracao_min: 30, ativo: true, created_at: new Date().toISOString() },
-  },
-  {
-    id: '3', barbeiro_id: 'b1', cliente_id: 'c3', servico_id: 's1',
-    data_hora: new Date(Date.now() + 7200000).toISOString(), duracao_min: 45,
-    status: 'finalizado', valor: 60, criado_em: new Date().toISOString(),
-    cliente: { id: 'c3', user_id: 'u1', nome: 'Rafael Oliveira', whatsapp: '(11) 96666-5555', total_visitas: 8, criado_em: new Date().toISOString() },
-    servico: { id: 's1', user_id: 'u1', nome: 'Corte de Cabelo', preco: 60, duracao_min: 45, ativo: true, created_at: new Date().toISOString() },
-  },
-]
-
 export function AgendamentosPage() {
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [view, setView] = useState<'dia' | 'semana'>('dia')
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [statusFilter, setStatusFilter] = useState<AgendamentoStatus | 'todos'>('todos')
+  const [agendamentos, setAgendamentos] = useState<Agendamento[]>([])
+
+  useEffect(() => {
+    if (!user?.id) return
+    api.agendamentos.list({
+      user_id: user.id,
+      date: format(selectedDate, 'yyyy-MM-dd'),
+    })
+      .then((data) => setAgendamentos(data.agendamentos))
+      .catch(() => setAgendamentos([]))
+  }, [user?.id, selectedDate])
 
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 })
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
-  const filtered = MOCK_AGENDAMENTOS.filter((a) => {
+  const filtered = agendamentos.filter((a) => {
     const sameDay = isSameDay(parseISO(a.data_hora), selectedDate)
     const statusMatch = statusFilter === 'todos' || a.status === statusFilter
     return sameDay && statusMatch
@@ -74,7 +62,7 @@ export function AgendamentosPage() {
         </Button>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Tabs value={view} onValueChange={(v) => setView(v as 'dia' | 'semana')}>
           <TabsList>
             <TabsTrigger value="dia">Dia</TabsTrigger>
@@ -92,13 +80,13 @@ export function AgendamentosPage() {
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
-        <div className="flex gap-1 ml-auto">
+        <div className="flex gap-1 overflow-x-auto">
           {(['todos', 'aguardando', 'confirmado', 'finalizado', 'cancelado'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
               className={cn(
-                'px-2 py-1 rounded text-xs font-medium transition-colors',
+                'px-2 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap',
                 statusFilter === s
                   ? 'bg-barber-500 text-white'
                   : 'bg-gray-100 dark:bg-dark-300 text-gray-500 hover:bg-gray-200'
@@ -113,7 +101,7 @@ export function AgendamentosPage() {
       {view === 'semana' && (
         <div className="grid grid-cols-7 gap-2">
           {weekDays.map((day, i) => {
-            const dayAgendamentos = MOCK_AGENDAMENTOS.filter((a) =>
+            const dayAgendamentos = agendamentos.filter((a) =>
               isSameDay(parseISO(a.data_hora), day)
             )
             const isToday = isSameDay(day, new Date())

@@ -10,6 +10,8 @@ import { BarbeirosPage } from '@/pages/Barbeiros'
 import { ServicosPage } from '@/pages/Servicos'
 import { BarbeiroDashboardPage } from '@/pages/BarbeiroDashboard'
 import { OnboardingPage } from '@/pages/Onboarding'
+import { UpgradePage } from '@/pages/Upgrade'
+import { Toaster } from '@/components/ui/toaster'
 import { Skeleton } from '@/components/ui/skeleton'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -63,10 +65,12 @@ export default function App() {
   }
 
   return (
-    <Routes>
+    <>
+      <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to={user?.onboarding_completed ? '/dashboard' : '/onboarding'} replace /> : <LoginPage />} />
       <Route path="/signup" element={isAuthenticated ? <Navigate to="/onboarding" replace /> : <SignupPage />} />
       <Route path="/onboarding" element={isAuthenticated && !user?.onboarding_completed ? <OnboardingPage /> : <Navigate to="/dashboard" replace />} />
+      <Route path="/upgrade" element={isAuthenticated ? <UpgradePage /> : <Navigate to="/login" replace />} />
 
       <Route
         element={
@@ -85,5 +89,7 @@ export default function App() {
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+      <Toaster />
+    </>
   )
 }

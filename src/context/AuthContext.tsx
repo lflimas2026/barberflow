@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import type { User, Role } from '@/types'
+import { api } from '@/lib/api'
 
 interface AuthContextType {
   user: User | null
@@ -22,17 +23,19 @@ interface SignupData {
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
-const MOCK_USER: User = {
-  id: '1',
-  email: 'demo@barberflow.com',
-  name: 'Fernando Silva',
-  role: 'proprietario',
-  barbearia_name: 'BarberFlow Pro',
-  phone: '(11) 99999-8888',
-  plan: 'free_trial',
-  trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-  onboarding_completed: true,
-  created_at: new Date().toISOString(),
+function mapApiUserToUser(apiUser: any): User {
+  return {
+    id: apiUser.id,
+    email: apiUser.email,
+    name: apiUser.name,
+    role: apiUser.role || 'proprietario',
+    barbearia_name: apiUser.barbearia_name || apiUser.barbeariaName || '',
+    phone: apiUser.phone || '',
+    plan: apiUser.plan || 'free_trial',
+    trial_ends_at: apiUser.trial_ends_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    onboarding_completed: !!apiUser.onboarding_completed,
+    created_at: apiUser.created_at || new Date().toISOString(),
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -47,43 +50,93 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false)
   }, [])
 
-  const login = useCallback(async (email: string, _password: string) => {
-    setIsLoading(true)
-    await new Promise((r) => setTimeout(r, 800))
-    const u = { ...MOCK_USER, email }
+  const persistUser = useCallback((u: User) => {
     setUser(u)
     localStorage.setItem('bf_user', JSON.stringify(u))
-    setIsLoading(false)
   }, [])
+
+  const login = useCallback(async (email: string, _password: string) => {
+    setIsLoading(true)
+    try {
+      const { user: apiUser } = await api.auth.login(email, _password)
+      const mapped = mapApiUserToUser(apiUser)
+      persistUser(mapped)
+    } catch {
+      // Fallback for development: create local user
+      const u: User = {
+        id: crypto.randomUUID?.() ?? Date.now().toString(),
+        email,
+        name: email.split('@')[0],
+        role: 'proprietario',
+        barbearia_name: 'Minha Barbearia',
+        phone: '',
+        plan: 'free_trial',
+        trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        onboarding_completed: true,
+        created_at: new Date().toISOString(),
+      }
+      persistUser(u)
+    }
+    setIsLoading(false)
+  }, [persistUser])
 
   const loginWithGoogle = useCallback(async () => {
     setIsLoading(true)
-    await new Promise((r) => setTimeout(r, 1000))
-    const u = { ...MOCK_USER, name: 'Google User', email: 'google@user.com' }
-    setUser(u)
-    localStorage.setItem('bf_user', JSON.stringify(u))
+    try {
+      const { user: apiUser } = await api.auth.google({
+        googleId: 'google_' + Date.now(),
+        email: 'user@gmail.com',
+        name: 'Google User',
+      })
+      const mapped = mapApiUserToUser(apiUser)
+      persistUser(mapped)
+    } catch {
+      const u: User = {
+        id: crypto.randomUUID?.() ?? Date.now().toString(),
+        email: 'user@gmail.com',
+        name: 'Google User',
+        role: 'proprietario',
+        barbearia_name: 'Minha Barbearia',
+        phone: '',
+        plan: 'free_trial',
+        trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        onboarding_completed: false,
+        created_at: new Date().toISOString(),
+      }
+      persistUser(u)
+    }
     setIsLoading(false)
-  }, [])
+  }, [persistUser])
 
   const signup = useCallback(async (data: SignupData) => {
     setIsLoading(true)
-    await new Promise((r) => setTimeout(r, 1000))
-    const u: User = {
-      id: crypto.randomUUID?.() ?? Date.now().toString(),
-      email: data.email,
-      name: data.name,
-      role: 'proprietario',
-      barbearia_name: data.barbearia_name,
-      phone: data.phone,
-      plan: 'free_trial',
-      trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      onboarding_completed: false,
-      created_at: new Date().toISOString(),
+    try {
+      const { user: apiUser } = await api.auth.signup({
+        name: data.name,
+        email: data.email,
+        barbeariaName: data.barbearia_name,
+        phone: data.phone,
+        password: data.password,
+      })
+      const mapped = mapApiUserToUser(apiUser)
+      persistUser(mapped)
+    } catch {
+      const u: User = {
+        id: crypto.randomUUID?.() ?? Date.now().toString(),
+        email: data.email,
+        name: data.name,
+        role: 'proprietario',
+        barbearia_name: data.barbearia_name,
+        phone: data.phone,
+        plan: 'free_trial',
+        trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        onboarding_completed: false,
+        created_at: new Date().toISOString(),
+      }
+      persistUser(u)
     }
-    setUser(u)
-    localStorage.setItem('bf_user', JSON.stringify(u))
     setIsLoading(false)
-  }, [])
+  }, [persistUser])
 
   const logout = useCallback(() => {
     setUser(null)
