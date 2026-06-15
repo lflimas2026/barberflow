@@ -2,6 +2,7 @@
 // Docs: https://docs.asaas.com/
 
 const ASAAS_API_URL = 'https://api.asaas.com/v3'
+const ASAAS_SANDBOX_URL = 'https://sandbox.asaas.com/api/v3'
 
 interface AsaasCustomer {
   id?: string
@@ -49,16 +50,16 @@ interface AsaasSubscription {
   externalReference?: string
 }
 
-export function createAsaasClient(apiKey: string) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'access_token': apiKey,
-  }
-
+export function createAsaasClient(apiKey: string, environment?: string) {
+  const baseUrl = environment === 'sandbox' ? ASAAS_SANDBOX_URL : ASAAS_API_URL
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${ASAAS_API_URL}${path}`, {
+    const res = await fetch(`${baseUrl}${path}`, {
       method,
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        'access_token': apiKey,
+        'User-Agent': 'BarberFlowPro/1.0',
+      },
       body: body ? JSON.stringify(body) : undefined,
     })
     if (!res.ok) {

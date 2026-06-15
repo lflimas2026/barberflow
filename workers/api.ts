@@ -283,7 +283,7 @@ app.post('/api/checkout', async (c) => {
       })
     }
 
-    const asaas = createAsaasClient(c.env.ASAAS_API_KEY)
+    const asaas = createAsaasClient(c.env.ASAAS_API_KEY, c.env.ASAAS_ENVIRONMENT)
     const price = PLAN_PRICES[plan]
     const planLabel = PLAN_LABELS[plan]
 
@@ -303,7 +303,12 @@ app.post('/api/checkout', async (c) => {
     }
 
     if (!userData?.id) {
-      return c.json({ error: 'User not found' }, 404)
+      // For checkout without DB user, generate a temp ID from customer data
+      if (userData.name && userData.email && userData.cpf) {
+        userData.id = `anon-${Date.now()}`
+      } else {
+        return c.json({ error: 'User not found' }, 404)
+      }
     }
 
     // Validate CPF
