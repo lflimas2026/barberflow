@@ -75,37 +75,52 @@ export function UpgradePage() {
   }
 
   const handleSubmitPayment = async () => {
+    const cpfClean = form.cpf.replace(/\D/g, '')
+    if (cpfClean.length !== 11) {
+      addToast({ title: 'CPF obrigatório', description: 'Informe um CPF válido para gerar o pagamento.', variant: 'error' })
+      return
+    }
+
     setProcessing(true)
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787'
-    try {
+
+    const body: Record<string, unknown> = {
+      plan: selectedPlan,
+      userId: user?.id,
+      paymentMethod,
+      customer: {
+        name: user?.name,
+        email: user?.email,
+        cpf: cpfClean,
+      },
+    }
+
+    if (paymentMethod === 'credit_card') {
       const [expiryMonth, expiryYear] = form.expiry.split('/')
+      body.customer = {
+        ...(body.customer as object),
+        cardName: form.cardName,
+        cardNumber: form.cardNumber.replace(/\s/g, ''),
+        cardExpiry: form.expiry,
+        cardExpiryMonth: expiryMonth,
+        cardExpiryYear: expiryYear ? `20${expiryYear}` : '',
+        cardCvv: form.cvv,
+      }
+    }
+
+    try {
       const res = await fetch(`${apiUrl}/api/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan: selectedPlan,
-          userId: user?.id,
-          paymentMethod,
-          customer: {
-            name: user?.name,
-            email: user?.email,
-            cpf: form.cpf,
-            cardName: form.cardName,
-            cardNumber: form.cardNumber.replace(/\s/g, ''),
-            cardExpiry: form.expiry,
-            cardCvv: form.cvv,
-          },
-        }),
+        body: JSON.stringify(body),
       })
       const data = await res.json()
 
       if (data.success) {
         if (data.pix) {
           setPixData(data.pix)
-          setStep('payment')
         } else if (data.boleto) {
           setBoletoData(data.boleto)
-          setStep('payment')
         } else {
           setPaymentSuccess(true)
           addToast({ title: 'Pagamento confirmado!', description: 'Seu plano foi ativado.', variant: 'success' })
@@ -115,8 +130,9 @@ export function UpgradePage() {
       } else {
         addToast({ title: 'Erro no pagamento', description: data.error || 'Tente novamente mais tarde.', variant: 'error' })
       }
-    } catch {
-      addToast({ title: 'Erro de conexão', description: 'Não foi possível processar o pagamento.', variant: 'error' })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Não foi possível processar o pagamento.'
+      addToast({ title: 'Erro de conexão', description: msg, variant: 'error' })
     } finally {
       setProcessing(false)
     }
@@ -241,12 +257,25 @@ export function UpgradePage() {
 
           {paymentMethod === 'pix' && !pixData && (
             <Card>
-              <CardContent className="p-6 text-center">
-                <Zap className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                <p className="font-medium">Pagamento via Pix</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Após confirmar, geraremos um QR Code para pagamento.
-                </p>
+              <CardContent className="p-6 space-y-4">
+                <div className="text-center">
+                  <Zap className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                  <p className="font-medium">Pagamento via Pix</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Após confirmar, geraremos um QR Code para pagamento.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    CPF <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-dark-400 bg-white dark:bg-dark-200 text-sm"
+                    placeholder="123.456.789-00"
+                    value={form.cpf}
+                    onChange={handleInputChange('cpf')}
+                  />
+                </div>
               </CardContent>
             </Card>
           )}
@@ -286,12 +315,25 @@ export function UpgradePage() {
 
           {paymentMethod === 'boleto' && !boletoData && (
             <Card>
-              <CardContent className="p-6 text-center">
-                <Building className="w-12 h-12 text-blue-500 mx-auto mb-3" />
-                <p className="font-medium">Boleto Bancário</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Vencimento em 3 dias úteis. O plano será ativado após a confirmação.
-                </p>
+              <CardContent className="p-6 space-y-4">
+                <div className="text-center">
+                  <Building className="w-12 h-12 text-blue-500 mx-auto mb-3" />
+                  <p className="font-medium">Boleto Bancário</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Vencimento em 3 dias úteis. O plano será ativado após a confirmação.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    CPF <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-dark-400 bg-white dark:bg-dark-200 text-sm"
+                    placeholder="123.456.789-00"
+                    value={form.cpf}
+                    onChange={handleInputChange('cpf')}
+                  />
+                </div>
               </CardContent>
             </Card>
           )}

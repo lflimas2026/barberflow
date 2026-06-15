@@ -248,6 +248,12 @@ app.post('/api/whatsapp/notify', async (c) => {
 
 // Find or create Asaas customer
 async function getOrCreateAsaasCustomer(asaas: ReturnType<typeof createAsaasClient>, user: { id: string; name: string; email: string; cpf?: string; phone?: string }) {
+  if (!user.cpf || user.cpf.replace(/\D/g, '').length !== 11) {
+    throw new Error('CPF do cliente é obrigatório para pagamento')
+  }
+
+  const cpfClean = user.cpf.replace(/\D/g, '')
+
   // Try to find existing customer
   const existing = await asaas.findCustomer(user.email).catch(() => null)
   if (existing?.data?.length > 0) {
@@ -258,7 +264,7 @@ async function getOrCreateAsaasCustomer(asaas: ReturnType<typeof createAsaasClie
   return asaas.createCustomer({
     name: user.name,
     email: user.email,
-    cpfCnpj: user.cpf || '00000000000',
+    cpfCnpj: cpfClean,
     phone: user.phone,
     externalReference: user.id,
   })
@@ -285,17 +291,30 @@ app.post('/api/checkout', async (c) => {
       return c.json({ error: 'Invalid plan' }, 400)
     }
 
-    // Get user data from DB
-    const user = customerData || await c.env.DB.prepare(
-      'SELECT * FROM users WHERE id = ?'
-    ).bind(userId).first()
+    // Merge customer data from frontend with DB user
+    let userData: any = customerData || {}
+    if (userId) {
+      const dbUser = await c.env.DB.prepare(
+        'SELECT * FROM users WHERE id = ?'
+      ).bind(userId).first()
+      if (dbUser) {
+        userData = { ...dbUser, ...userData }
+      }
+    }
 
-    if (!user) {
+    if (!userData?.id) {
       return c.json({ error: 'User not found' }, 404)
     }
 
+    // Validate CPF
+    const cpfClean = (userData.cpf || '').replace(/\D/g, '')
+    if (cpfClean.length !== 11) {
+      return c.json({ error: 'CPF inválido. Informe um CPF com 11 dígitos.' }, 400)
+    }
+    userData.cpf = cpfClean
+
     // Get or create Asaas customer
-    const asaasCustomer = await getOrCreateAsaasCustomer(asaas, user as any)
+    const asaasCustomer = await getOrCreateAsaasCustomer(asaas, userData)
 
     let payment
 
@@ -341,18 +360,17 @@ app.post('/api/checkout', async (c) => {
       }
 
       case 'credit_card': {
-        const [expiryMonth, expiryYear] = (customerData?.cardExpiry || '12/30').split('/')
         payment = await asaas.createCreditCardPayment({
           customerId: asaasCustomer.id!,
           value: price,
           description: `Assinatura ${planLabel}`,
-          holderName: customerData?.cardName || user.name,
+          holderName: customerData?.cardName || userData.name,
           cardNumber: customerData?.cardNumber || '',
-          expiryMonth,
-          expiryYear: `20${expiryYear}`,
+          expiryMonth: customerData?.cardExpiryMonth || '12',
+          expiryYear: customerData?.cardExpiryYear || '2030',
           ccv: customerData?.cardCvv || '',
-          holderCpfCnpj: customerData?.cpf || '00000000000',
-          holderEmail: user.email,
+          holderCpfCnpj: cpfClean,
+          holderEmail: userData.email,
         })
 
         // If payment was successful, create subscription for recurring billing
